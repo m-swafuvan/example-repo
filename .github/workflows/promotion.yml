@@ -1,0 +1,64 @@
+name: Create Promotion Branch
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_branch:
+        description: "Branch to promote into (release/qa or release/uat)"
+        required: true
+        default: "release/qa"
+      commit_shas:
+        description: "Comma-separated list of commit SHAs from develop"
+        required: true
+
+jobs:
+  promote:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write  # Needed to push branches
+
+    steps:
+    - name: Checkout target branch
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.target_branch }}
+
+    - name: Set up Git identity
+      run: |
+        git config user.name "github-actions"
+        git config user.email "github-actions@github.com"
+
+    - name: Cherry-pick commits on temp branch
+      id: cherry_pick
+      run: |
+        set -euo pipefail
+
+        # Create temporary branch from target
+        TEMP_BRANCH="temp-promo-$$"
+        git checkout -b "$TEMP_BRANCH"
+
+        # Split SHAs and cherry-pick each
+        IFS=',' read -ra COMMITS <<< "${{ github.event.inputs.commit_shas }}"
+        for SHA in "${COMMITS[@]}"; do
+          SHA=$(echo "$SHA" | xargs)  # Trim spaces
+          echo "Cherry-picking $SHA..."
+          git cherry-pick "$SHA" || { 
+            echo "Cherry-pick failed at $SHA. Aborting workflow."
+            git cherry-pick --abort
+            exit 1
+          }
+        done
+
+        # Only after all cherry-picks succeed, rename branch to final intermediate name
+        TS=$(date +'%Y%m%d-%H%M%S')
+        FINAL_BRANCH="promo/${{ github.event.inputs.target_branch }}/$TS"
+        git branch -m "$FINAL_BRANCH"
+        echo "branch_name=$FINAL_BRANCH" >> $GITHUB_OUTPUT
+
+    - name: Push new branch
+      run: |
+        git push --set-upstream origin ${{ steps.cherry_pick.outputs.branch_name }}
+
+    - name: Show output
+      run: |
+        echo "Created branch: ${{ steps.cherry_pick.outputs.branch_name }}"
