@@ -18,10 +18,14 @@ jobs:
       contents: write  # Needed to push branches
 
     steps:
-    - name: Checkout target branch
+    - name: Checkout target branch with full history
       uses: actions/checkout@v4
       with:
         ref: ${{ github.event.inputs.target_branch }}
+        fetch-depth: 0
+
+    - name: Fetch develop branch
+      run: git fetch origin develop
 
     - name: Set up Git identity
       run: |
