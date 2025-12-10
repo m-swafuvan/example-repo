@@ -18,10 +18,14 @@ jobs:
       contents: write
 
     steps:
-    - name: Checkout target branch
+    - name: Checkout target branch with full history
       uses: actions/checkout@v4
       with:
         ref: ${{ github.event.inputs.target_branch }}
+        fetch-depth: 0  # fetch all commits
+        
+    - name: Fetch all branches
+      run: git fetch --all
 
     - name: Set up Git identity
       run: |
