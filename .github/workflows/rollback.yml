@@ -1,0 +1,67 @@
+name: QA Rollback Commits
+
+on:
+  workflow_dispatch:
+    inputs:
+      target_branch:
+        description: "Branch where commits need to be rolled back (release/qa or release/uat)"
+        required: true
+        default: "release/qa"
+      commit_shas:
+        description: "Comma-separated list of commit SHAs to revert"
+        required: true
+
+jobs:
+  rollback:
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+
+    steps:
+    - name: Checkout target branch
+      uses: actions/checkout@v4
+      with:
+        ref: ${{ github.event.inputs.target_branch }}
+
+    - name: Set up Git identity
+      run: |
+        git config user.name "github-actions"
+        git config user.email "github-actions@github.com"
+
+    - name: Create temp rollback branch and revert commits
+      id: rollback
+      run: |
+        set -euo pipefail
+
+        # Temporary rollback branch
+        TEMP_BRANCH="rollback-$$"
+        git checkout -b "$TEMP_BRANCH"
+
+        # Split SHAs and revert each
+        IFS=',' read -ra COMMITS <<< "${{ github.event.inputs.commit_shas }}"
+        for SHA in "${COMMITS[@]}"; do
+          SHA=$(echo "$SHA" | xargs)
+          echo "Reverting commit $SHA..."
+          git revert --no-commit "$SHA" || {
+            echo "Revert failed at $SHA. Aborting workflow."
+            git revert --abort
+            exit 1
+          }
+        done
+
+        # Commit all reverted changes
+        git commit -m "Rollback QA-failed commits: ${{ github.event.inputs.commit_shas }}"
+
+        # Rename branch to final rollback branch name
+        TS=$(date +'%Y%m%d-%H%M%S')
+        FINAL_BRANCH="rollback/${{ github.event.inputs.target_branch }}/$TS"
+        git branch -m "$FINAL_BRANCH"
+        echo "branch_name=$FINAL_BRANCH" >> $GITHUB_OUTPUT
+
+    - name: Push rollback branch
+      run: |
+        git push --set-upstream origin ${{ steps.rollback.outputs.branch_name }}
+
+    - name: Show output
+      run: |
+        echo "Rollback branch created: ${{ steps.rollback.outputs.branch_name }}"
